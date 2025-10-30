@@ -67,11 +67,11 @@ const EditProfileDialog = ({ open, onOpenChange }: EditProfileDialogProps) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-card max-h-[90vh] flex flex-col">
+      <DialogContent className="sm:max-w-md bg-card">
         <DialogHeader>
           <DialogTitle>Edit Profile</DialogTitle>
         </DialogHeader>
-        <ScrollArea className="flex-1 px-1">
+        <ScrollArea className="h-[60vh] px-1">
           <div className="space-y-4 py-4 pr-4">
             <div className="flex flex-col items-center space-y-2">
               <div className="relative">
@@ -155,7 +155,7 @@ const EditProfileDialog = ({ open, onOpenChange }: EditProfileDialogProps) => {
             </div>
           </div>
         </ScrollArea>
-        <div className="flex justify-end gap-3 pt-4 border-t">
+        <div className="flex justify-end gap-3 pt-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
