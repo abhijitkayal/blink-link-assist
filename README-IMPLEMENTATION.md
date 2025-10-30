@@ -74,46 +74,72 @@ npm run preview
 
 ### ✅ Profile Management
 - Profile dropdown in navbar (top-left)
-- Edit Profile dialog with:
+- Avatar upload & display with base64 storage
+- Edit Profile dialog (scrollable) with:
   - Name, Phone, Email, Address
   - Caretaker Name & Phone
+  - Avatar image upload
 - Medical Details dialog with:
   - Patient ID
   - Hospital Name, Address, Phone
 - All data stored in localStorage
 - Integrated with emergency & need webhooks
 
-### ✅ Device Status Card
-- Real-time connection status (Connected/Disconnected)
-- Device ID and transport type display
-- Live "last seen" timestamp
-- Event log with latest 50 blink events
-- Dev-only "Test Blink" button
-- Pulsing live indicator
-- Real WebSocket connection via socket.io-client
+### ✅ Device Status in Navbar
+- Real-time device connection indicator in top-right navbar
+- 🟢 Green = Connected (animated pulse)
+- 🔴 Red = Disconnected
+- Tooltip on hover showing connection status
+- Updates via WebSocket connection
+
+### ✅ Blink-Based Navigation System
+- **1 blink**: Ignored (stabilizing)
+- **2 blinks (within 2s)**: Navigate to next menu option
+- **3 blinks (within 2s)**: Select current option (triggers webhook)
+- **5 blinks (within 3s)**: Trigger emergency alert
+- Visual highlighting with ring animation on active menu item
+- Audio feedback for navigation and selection
+- Auto-reset pointer after selection
 
 ### ✅ Basic Needs Buttons
 - 🍔 Food (orange pastel) - plays 440Hz tone
 - 💧 Water (blue pastel) - plays 523Hz tone
 - 🚻 Toilet (purple pastel) - plays 659Hz tone
 - 🆘 Help (pink pastel) - plays 784Hz tone
+- Visual highlight (ring + scale) for active selection
 - Sound feedback via Web Audio API
+- Click or blink-based selection
+- Includes patient name in webhook payload
 - Posts to backend `/api/trigger-n8n` which forwards to n8n
 - Sends caretaker info from profile
 
 ### ✅ Emergency System
 - Single "🚨 EMERGENCY 🚨" button with pulsing animation
+- Triggered by clicking button OR 5 blinks within 3 seconds
 - Immediately triggers n8n voice agent webhook
 - Sends complete patient payload:
-  - Patient name, ID
+  - Patient name, phone, email, address
+  - Patient ID
   - Hospital details (name, address, phone)
   - Caretaker details (name, phone)
 - Voice agent calls hospital and caretaker automatically
+- IST timestamp for Indian timezone
 - No secondary buttons needed
 
+### ✅ Light Control
+- 💡 Light Control card with toggle button
+- Shows "💡 Light ON" (green) or "Light OFF" (red)
+- Sends MQTT/REST command to ESP32
+- Real-time state updates via WebSocket
+- Toast notifications for state changes
+- Persistent state tracking
+
 ### ✅ Backend Integration
-- `/api/trigger-n8n` endpoint in server/index.js
-- Proxies requests to n8n webhook
+- `/api/trigger-n8n` endpoint - proxies to n8n webhook
+- `/api/blink` endpoint - handles blink count events from ESP32
+- `/api/light` endpoint - handles light toggle commands
+- `/api/heartbeat` endpoint - ESP32 device heartbeats
+- WebSocket events: `blinkCount`, `lightCommand`, `lightState`
 - Forwards both "need" and "emergency" payloads
 - Handles errors gracefully
 
@@ -190,12 +216,15 @@ useEffect(() => {
 ```json
 {
   "type": "emergency",
-  "timestamp": "2025-10-30T12:34:56.789Z",
+  "timestamp": "2025-10-30 12:34:56 PM IST",
   "patient": {
     "name": "John Doe",
+    "phone": "+91XXXXXXXXXX",
+    "email": "john@example.com",
+    "address": "Block 3, CityCare Apartments",
     "patient_id": "PID12345",
     "hospital_name": "CityCare Hospital",
-    "hospital_address": "123 Main St",
+    "hospital_address": "123 Main St, City",
     "hospital_phone": "+91XXXXXXXXXX",
     "caretaker_name": "Jane Doe",
     "caretaker_phone": "+91XXXXXXXXXX"
@@ -208,10 +237,33 @@ useEffect(() => {
 ```json
 {
   "type": "need",
-  "item": "🍔 Food",
-  "timestamp": "2025-10-30T12:34:56.789Z",
+  "option": "🍔 Food",
+  "timestamp": "2025-10-30 12:34:56 PM IST",
   "caretaker_name": "Jane Doe",
-  "caretaker_phone": "+91XXXXXXXXXX"
+  "caretaker_phone": "+91XXXXXXXXXX",
+  "patient_name": "John Doe"
+}
+```
+
+### Blink Count Event (ESP32 → Backend)
+
+ESP32 should POST to `/api/blink`:
+```json
+{
+  "deviceId": "esp32-01",
+  "blinkCount": 3,
+  "timestamp": "2025-10-30T12:34:56.789Z"
+}
+```
+
+### Light Control Command (Frontend → ESP32)
+
+Frontend POSTs to `/api/light`, backend emits via WebSocket:
+```json
+{
+  "deviceId": "esp32-01",
+  "command": "toggle_light",
+  "state": "on" // or "off"
 }
 ```
 
@@ -262,19 +314,75 @@ curl -X POST http://localhost:8787/api/trigger-n8n \
 
 ## ESP32 Integration
 
-See `server/README.md` for:
-- Arduino sketch example
-- MQTT alternative setup
-- Testing with curl
+### Blink Detection & Navigation
 
-### Quick Test
+The ESP32 should:
+1. **Detect blinks** using EOG (Electrooculography) sensor
+2. **Count blinks** in rolling time windows (2-3s)
+3. **POST blink counts** to backend at `/api/blink`:
+
+```cpp
+// Example ESP32 code snippet
+void sendBlinkCount(int count) {
+  HTTPClient http;
+  http.begin("http://your-server:8787/api/blink");
+  http.addHeader("Content-Type", "application/json");
+  
+  String payload = "{\"deviceId\":\"" + String(DEVICE_ID) + 
+                   "\",\"blinkCount\":" + String(count) + 
+                   ",\"timestamp\":\"" + getISOTimestamp() + "\"}";
+  
+  int httpCode = http.POST(payload);
+  http.end();
+}
+```
+
+4. **Listen for light control** commands via WebSocket:
+
+```cpp
+// ESP32 subscribes to 'lightCommand' event
+// When received, toggle GPIO pin controlling relay
+void handleLightCommand(String state) {
+  if (state == "on") {
+    digitalWrite(LIGHT_PIN, HIGH);
+  } else {
+    digitalWrite(LIGHT_PIN, LOW);
+  }
+  
+  // Send state confirmation back
+  sendLightStateUpdate(state == "on");
+}
+```
+
+### Blink Navigation Logic (Frontend)
+
+| Blinks | Time Window | Action |
+|--------|-------------|--------|
+| 1 | - | Ignored (stabilizing) |
+| 2 | 2 seconds | Move to next menu option |
+| 3 | 2 seconds | Select current option → trigger webhook |
+| 5 | 3 seconds | Emergency alert → call hospital & caretaker |
+
+### Testing Blink Events
 
 ```bash
-# Simulate blink from ESP32
+# Simulate 2 blinks (navigate)
 curl -X POST http://localhost:8787/api/blink \
   -H "Content-Type: application/json" \
-  -d '{"deviceId":"esp32-01"}'
+  -d '{"deviceId":"esp32-01","blinkCount":2,"timestamp":"2025-10-30T12:00:00Z"}'
+
+# Simulate 3 blinks (select)
+curl -X POST http://localhost:8787/api/blink \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"esp32-01","blinkCount":3,"timestamp":"2025-10-30T12:00:00Z"}'
+
+# Simulate 5 blinks (emergency)
+curl -X POST http://localhost:8787/api/blink \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"esp32-01","blinkCount":5,"timestamp":"2025-10-30T12:00:00Z"}'
 ```
+
+See `server/README.md` for complete Arduino sketch examples.
 
 ## Authentication (Clerk)
 
@@ -323,19 +431,30 @@ All colors and styles use semantic tokens from `src/index.css`:
 
 - [ ] All routes navigate correctly
 - [ ] Profile dropdown opens from navbar
+- [ ] Avatar upload and display works
+- [ ] Edit Profile form is scrollable
 - [ ] Edit Profile form saves to localStorage
 - [ ] Medical Details form saves to localStorage
-- [ ] Device status shows connected/disconnected
-- [ ] Last seen updates every second
-- [ ] Blink events appear in log
-- [ ] Test Blink button works (dev mode)
+- [ ] Device connection status shows in navbar (🟢/🔴)
+- [ ] Device status updates in real-time
+- [ ] Blink navigation highlights correct menu item
+- [ ] 2 blinks navigates to next option
+- [ ] 3 blinks selects current option
+- [ ] 5 blinks triggers emergency
+- [ ] Navigation sound feedback plays
+- [ ] Selection sound feedback plays
 - [ ] All action buttons disable during send
-- [ ] Sound plays when basic need button clicked
 - [ ] Status indicator shows sending/success/error
-- [ ] Emergency button triggers with profile data
-- [ ] Backend /api/trigger-n8n forwards to n8n
+- [ ] Light control toggle changes state
+- [ ] Light toggle sends command to backend
+- [ ] Emergency button works (click or 5 blinks)
+- [ ] Emergency includes all patient data
+- [ ] Backend `/api/trigger-n8n` forwards to n8n
+- [ ] Backend `/api/blink` handles blink counts
+- [ ] Backend `/api/light` handles light control
 - [ ] n8n receives correct payload structure
 - [ ] Responsive layout on mobile (320px+)
+- [ ] Tooltips work on device status
 - [ ] No console errors
 - [ ] Accessible keyboard navigation
 

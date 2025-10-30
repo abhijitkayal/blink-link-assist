@@ -1,5 +1,6 @@
 import { Zap } from "lucide-react";
 import ProfileDropdown from "./ProfileDropdown";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
 interface NavbarProps {
   userName?: string;
@@ -27,33 +28,26 @@ const Navbar = ({ userName = "User", isConnected = false }: NavbarProps) => {
             </h1>
           </div>
 
-          {/* Right: User Info */}
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2">
-              <div className="text-right">
-                <p className="text-sm font-medium text-foreground">{userName}</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
-                  }`}
-                />
-                <span className="text-sm font-medium text-muted-foreground">
-                  {isConnected ? "Active" : "Inactive"}
-                </span>
-              </div>
-            </div>
-            
-            {/* Mobile: Just status indicator */}
-            <div className="md:hidden">
-              <div
-                className={`h-3 w-3 rounded-full ${
-                  isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
-                }`}
-              />
-            </div>
-          </div>
+          {/* Right: Device Connection Status */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2 cursor-help">
+                  <div
+                    className={`h-3 w-3 rounded-full ${
+                      isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
+                    }`}
+                  />
+                  <span className="hidden md:inline text-sm font-medium text-foreground">
+                    {isConnected ? "Device Connected" : "Device Disconnected"}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isConnected ? "ESP32 Device Connected" : "ESP32 Device Disconnected"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
     </nav>

@@ -58,6 +58,10 @@ All colors MUST be HSL.
     --action-help: 330 95% 90%;
     --action-help-fg: 330 70% 30%;
     --action-help-border: 330 90% 75%;
+
+    --action-light: 140 95% 85%;
+    --action-light-fg: 140 70% 25%;
+    --action-light-border: 140 90% 70%;
     
     --action-hospital: 45 95% 85%;
     --action-hospital-fg: 45 70% 25%;
@@ -153,5 +157,20 @@ All colors MUST be HSL.
   
   .pulse-slow {
     animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% {
+      opacity: 1;
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+    }
+    50% {
+      opacity: 0.8;
+      box-shadow: 0 0 40px rgba(239, 68, 68, 0.8);
+    }
+  }
+  
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
   }
 }

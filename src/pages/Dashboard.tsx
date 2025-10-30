@@ -1,19 +1,133 @@
-import { useState } from "react";
-import { UtensilsCrossed, Droplet, Users as Toilet, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { UtensilsCrossed, Droplet, Users as Toilet, AlertCircle, Lightbulb } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import DeviceStatusCard from "@/components/DeviceStatusCard";
 import StatusIndicator from "@/components/StatusIndicator";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import axios from "axios";
+import { io, Socket } from "socket.io-client";
+import { toast } from "@/hooks/use-toast";
 
-type ActionType = "food" | "water" | "toilet" | "help" | "emergency";
+type ActionType = "food" | "water" | "toilet" | "help" | "emergency" | "light";
 type StatusType = "idle" | "sending" | "success" | "error";
+
+interface BasicNeed {
+  id: ActionType;
+  label: string;
+  icon: any;
+  emoji: string;
+}
 
 const Dashboard = () => {
   const [sendingAction, setSendingAction] = useState<ActionType | null>(null);
   const [status, setStatus] = useState<StatusType>("idle");
   const [statusMessage, setStatusMessage] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [activeMenuIndex, setActiveMenuIndex] = useState(0);
+  const [blinkCount, setBlinkCount] = useState(0);
+  const [blinkTimer, setBlinkTimer] = useState<NodeJS.Timeout | null>(null);
+  const [lightState, setLightState] = useState(false);
+
+  const basicNeeds: BasicNeed[] = [
+    { id: "food", label: "Food", icon: UtensilsCrossed, emoji: "🍔" },
+    { id: "water", label: "Water", icon: Droplet, emoji: "💧" },
+    { id: "toilet", label: "Toilet", icon: Toilet, emoji: "🚽" },
+    { id: "help", label: "Help", icon: AlertCircle, emoji: "🆘" },
+  ];
+
+  // WebSocket connection
+  useEffect(() => {
+    const wsUrl = import.meta.env.VITE_WS_URL || "http://localhost:8787";
+    const deviceId = import.meta.env.VITE_DEVICE_ID || "esp32-01";
+    const newSocket = io(wsUrl, {
+      query: { deviceId },
+    });
+
+    newSocket.on("connect", () => {
+      setIsConnected(true);
+      newSocket.emit("hello", { app: "blink-comm", version: "1.0.0", deviceId });
+    });
+
+    newSocket.on("disconnect", () => {
+      setIsConnected(false);
+    });
+
+    // Handle blink count events from ESP32
+    newSocket.on("blinkCount", (data: { deviceId: string; blinkCount: number; timestamp: string }) => {
+      if (data.deviceId === deviceId) {
+        handleBlinkEvent(data.blinkCount);
+      }
+    });
+
+    // Handle light state updates
+    newSocket.on("lightState", (data: { deviceId: string; state: boolean }) => {
+      if (data.deviceId === deviceId) {
+        setLightState(data.state);
+      }
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
+  // Handle blink events based on count
+  const handleBlinkEvent = (count: number) => {
+    setBlinkCount(count);
+
+    // Clear existing timer
+    if (blinkTimer) {
+      clearTimeout(blinkTimer);
+    }
+
+    // 1 blink = ignored (stabilizing)
+    if (count === 1) {
+      const timer = setTimeout(() => setBlinkCount(0), 2000);
+      setBlinkTimer(timer);
+      return;
+    }
+
+    // 2 blinks within 2s = move to next menu
+    if (count === 2) {
+      setActiveMenuIndex((prev) => (prev + 1) % basicNeeds.length);
+      playSound("navigate");
+      toast({
+        title: "Navigated",
+        description: `Selected: ${basicNeeds[(activeMenuIndex + 1) % basicNeeds.length].label}`,
+        duration: 1500,
+      });
+      const timer = setTimeout(() => setBlinkCount(0), 2000);
+      setBlinkTimer(timer);
+      return;
+    }
+
+    // 3 blinks within 2s = select current option
+    if (count === 3) {
+      const selected = basicNeeds[activeMenuIndex];
+      handleBasicNeed(selected.id, selected.label, selected.emoji);
+      const timer = setTimeout(() => {
+        setBlinkCount(0);
+        setActiveMenuIndex(0); // Reset to first option after selection
+      }, 2000);
+      setBlinkTimer(timer);
+      return;
+    }
+
+    // 5 blinks within 3s = trigger emergency
+    if (count === 5) {
+      handleEmergency();
+      const timer = setTimeout(() => setBlinkCount(0), 3000);
+      setBlinkTimer(timer);
+      return;
+    }
+
+    // Reset for other counts
+    const timer = setTimeout(() => setBlinkCount(0), 3000);
+    setBlinkTimer(timer);
+  };
 
   // Play sound for basic needs
   const playSound = (type: string) => {
@@ -22,6 +136,8 @@ const Dashboard = () => {
       Water: 523, // C5
       Toilet: 659, // E5
       Help: 784, // G5
+      navigate: 350, // F4
+      select: 600, // D5
     };
 
     const audioContext = new AudioContext();
@@ -56,6 +172,7 @@ const Dashboard = () => {
 
     // Play sound
     playSound(item);
+    playSound("select"); // Confirmation sound
 
     // Get profile data
     const profileData = JSON.parse(localStorage.getItem("profileData") || "{}");
@@ -63,10 +180,11 @@ const Dashboard = () => {
     try {
       await sendToWebhook({
         type: "need",
-        item: `${emoji} ${item}`,
-        timestamp: new Date().toISOString(),
+        option: `${emoji} ${item}`,
+        timestamp: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         caretaker_name: profileData.caretakerName || "Unknown",
         caretaker_phone: profileData.caretakerPhone || "N/A",
+        patient_name: profileData.name || "Unknown Patient",
       });
       setStatus("success");
       setStatusMessage(item);
@@ -95,9 +213,12 @@ const Dashboard = () => {
     try {
       await sendToWebhook({
         type: "emergency",
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         patient: {
           name: profileData.name || "Unknown Patient",
+          phone: profileData.phone || "N/A",
+          email: profileData.email || "N/A",
+          address: profileData.address || "N/A",
           patient_id: medicalData.patientId || "N/A",
           hospital_name: medicalData.hospitalName || "Unknown Hospital",
           hospital_address: medicalData.hospitalAddress || "N/A",
@@ -121,9 +242,32 @@ const Dashboard = () => {
     }, 2000);
   };
 
+  const handleLightToggle = async () => {
+    const newState = !lightState;
+    setLightState(newState);
+
+    // Send to backend/ESP32
+    try {
+      const backendUrl = import.meta.env.VITE_WS_URL || "http://localhost:8787";
+      await axios.post(`${backendUrl}/api/light`, {
+        deviceId: import.meta.env.VITE_DEVICE_ID || "esp32-01",
+        command: "toggle_light",
+        state: newState ? "on" : "off",
+      });
+
+      toast({
+        title: newState ? "Light Turned ON" : "Light Turned OFF",
+        description: `Light is now ${newState ? "on" : "off"}`,
+      });
+    } catch (error) {
+      console.error("Failed to toggle light:", error);
+      setLightState(!newState); // Revert on error
+    }
+  };
+
   return (
     <div className="min-h-screen">
-      <Navbar userName="User" isConnected={true} />
+      <Navbar userName="User" isConnected={isConnected} />
       
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Header */}
@@ -137,49 +281,49 @@ const Dashboard = () => {
         </div>
 
         <div className="space-y-6">
-          {/* Device Status Card */}
-          <DeviceStatusCard deviceId={import.meta.env.VITE_DEVICE_ID || "esp32-01"} />
-
           {/* Basic Needs Card */}
           <Card className="border-2 p-6 shadow-lg">
             <h2 className="mb-6 text-2xl font-semibold text-foreground">Basic Needs</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Button
-                onClick={() => handleBasicNeed("food", "Food", "🍔")}
-                disabled={sendingAction === "food"}
-                className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-food))] text-[hsl(var(--action-food-fg))] border-[hsl(var(--action-food-border))] hover:bg-[hsl(var(--action-food))]/80"
-              >
-                <UtensilsCrossed className="h-8 w-8" />
-                <span className="text-lg font-semibold">Food</span>
-              </Button>
-
-              <Button
-                onClick={() => handleBasicNeed("water", "Water", "💧")}
-                disabled={sendingAction === "water"}
-                className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-water))] text-[hsl(var(--action-water-fg))] border-[hsl(var(--action-water-border))] hover:bg-[hsl(var(--action-water))]/80"
-              >
-                <Droplet className="h-8 w-8" />
-                <span className="text-lg font-semibold">Water</span>
-              </Button>
-
-              <Button
-                onClick={() => handleBasicNeed("toilet", "Toilet", "🚽")}
-                disabled={sendingAction === "toilet"}
-                className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-toilet))] text-[hsl(var(--action-toilet-fg))] border-[hsl(var(--action-toilet-border))] hover:bg-[hsl(var(--action-toilet))]/80"
-              >
-                <Toilet className="h-8 w-8" />
-                <span className="text-lg font-semibold">Toilet</span>
-              </Button>
-
-              <Button
-                onClick={() => handleBasicNeed("help", "Help", "🆘")}
-                disabled={sendingAction === "help"}
-                className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-help))] text-[hsl(var(--action-help-fg))] border-[hsl(var(--action-help-border))] hover:bg-[hsl(var(--action-help))]/80"
-              >
-                <AlertCircle className="h-8 w-8" />
-                <span className="text-lg font-semibold">Help</span>
-              </Button>
+              {basicNeeds.map((need, index) => {
+                const Icon = need.icon;
+                const isActive = index === activeMenuIndex;
+                return (
+                  <Button
+                    key={need.id}
+                    onClick={() => handleBasicNeed(need.id, need.label, need.emoji)}
+                    disabled={sendingAction === need.id}
+                    className={`action-btn h-auto flex-col gap-3 transition-all duration-300 ${
+                      isActive
+                        ? "ring-4 ring-primary ring-offset-2 scale-105 shadow-xl"
+                        : ""
+                    } bg-[hsl(var(--action-${need.id}))] text-[hsl(var(--action-${need.id}-fg))] border-[hsl(var(--action-${need.id}-border))] hover:bg-[hsl(var(--action-${need.id}))]/80`}
+                  >
+                    <Icon className="h-8 w-8" />
+                    <span className="text-lg font-semibold">{need.label}</span>
+                    {isActive && (
+                      <span className="text-xs font-normal opacity-70">← Selected</span>
+                    )}
+                  </Button>
+                );
+              })}
             </div>
+          </Card>
+
+          {/* Light Control Card */}
+          <Card className="border-2 p-6 shadow-lg">
+            <h2 className="mb-6 text-2xl font-semibold text-foreground">Light Control</h2>
+            <Button
+              onClick={handleLightToggle}
+              className={`w-full h-auto py-8 text-xl font-bold rounded-xl shadow-lg transition-all ${
+                lightState
+                  ? "bg-green-500 hover:bg-green-600 text-white"
+                  : "bg-red-500 hover:bg-red-600 text-white"
+              }`}
+            >
+              <Lightbulb className="h-8 w-8 mr-3" />
+              {lightState ? "💡 Light ON" : "Light OFF"}
+            </Button>
           </Card>
 
           {/* Emergency Card */}

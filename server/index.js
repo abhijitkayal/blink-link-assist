@@ -88,7 +88,7 @@ app.post('/api/heartbeat', (req, res) => {
 
 // REST endpoint: ESP32 blink event
 app.post('/api/blink', (req, res) => {
-  const { deviceId, timestamp, count } = req.body;
+  const { deviceId, timestamp, blinkCount } = req.body;
 
   if (!deviceId) {
     return res.status(400).json({ error: 'deviceId required' });
@@ -96,17 +96,39 @@ app.post('/api/blink', (req, res) => {
 
   const blinkEvent = {
     deviceId,
-    type: 'blink',
-    count: count || 1,
+    blinkCount: blinkCount || 1,
     timestamp: timestamp || new Date().toISOString(),
   };
 
-  // Broadcast blink event to all connected clients
-  io.emit('blink', blinkEvent);
+  // Broadcast blink count to all connected clients
+  io.emit('blinkCount', blinkEvent);
 
-  console.log(`[BLINK] Device ${deviceId} blinked`);
+  console.log(`[BLINK] Device ${deviceId} blink count: ${blinkCount}`);
 
   res.json({ success: true, event: blinkEvent });
+});
+
+// REST endpoint: Light control
+app.post('/api/light', (req, res) => {
+  const { deviceId, command, state } = req.body;
+
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId required' });
+  }
+
+  const lightEvent = {
+    deviceId,
+    command,
+    state,
+    timestamp: new Date().toISOString(),
+  };
+
+  // Broadcast light command to ESP32
+  io.emit('lightCommand', lightEvent);
+
+  console.log(`[LIGHT] Device ${deviceId} light ${state}`);
+
+  res.json({ success: true, event: lightEvent });
 });
 
 // n8n webhook proxy endpoint
@@ -177,6 +199,12 @@ io.on('connection', (socket) => {
         transport: 'ws',
       });
     });
+  });
+
+  // Handle light state updates from ESP32
+  socket.on('lightStateUpdate', (data) => {
+    console.log('[WS] Light state update:', data);
+    io.emit('lightState', data);
   });
 
   socket.on('disconnect', () => {
