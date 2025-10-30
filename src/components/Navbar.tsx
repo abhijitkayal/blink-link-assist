@@ -1,4 +1,5 @@
 import { Zap } from "lucide-react";
+import ProfileDropdown from "./ProfileDropdown";
 
 interface NavbarProps {
   userName?: string;
@@ -10,8 +11,9 @@ const Navbar = ({ userName = "User", isConnected = false }: NavbarProps) => {
     <nav className="sticky top-0 z-50 border-b border-border/40 bg-card/80 backdrop-blur-sm">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
-          {/* Left: Logo + Title */}
-          <div className="flex items-center gap-2">
+          {/* Left: Profile Dropdown + Logo + Title */}
+          <div className="flex items-center gap-3">
+            <ProfileDropdown />
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Zap className="h-5 w-5" />
             </div>

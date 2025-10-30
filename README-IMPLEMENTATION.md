@@ -72,6 +72,17 @@ npm run preview
 
 ## Features Implemented
 
+### ✅ Profile Management
+- Profile dropdown in navbar (top-left)
+- Edit Profile dialog with:
+  - Name, Phone, Email, Address
+  - Caretaker Name & Phone
+- Medical Details dialog with:
+  - Patient ID
+  - Hospital Name, Address, Phone
+- All data stored in localStorage
+- Integrated with emergency & need webhooks
+
 ### ✅ Device Status Card
 - Real-time connection status (Connected/Disconnected)
 - Device ID and transport type display
@@ -79,21 +90,32 @@ npm run preview
 - Event log with latest 50 blink events
 - Dev-only "Test Blink" button
 - Pulsing live indicator
+- Real WebSocket connection via socket.io-client
 
 ### ✅ Basic Needs Buttons
-- 🍔 Food (orange pastel)
-- 💧 Water (blue pastel)
-- 🚻 Toilet (purple pastel)
-- 🆘 Help (pink pastel)
-- Large, accessible, with hover effects
-- Posts to n8n webhook on click
+- 🍔 Food (orange pastel) - plays 440Hz tone
+- 💧 Water (blue pastel) - plays 523Hz tone
+- 🚻 Toilet (purple pastel) - plays 659Hz tone
+- 🆘 Help (pink pastel) - plays 784Hz tone
+- Sound feedback via Web Audio API
+- Posts to backend `/api/trigger-n8n` which forwards to n8n
+- Sends caretaker info from profile
 
 ### ✅ Emergency System
-- Primary "🚨 EMERGENCY 🚨" button with pulsing animation
-- Reveals secondary options:
-  - 🏥 Call Hospital (yellow pastel)
-  - 📞 Call Family (green pastel)
-- All actions POST to configured webhook
+- Single "🚨 EMERGENCY 🚨" button with pulsing animation
+- Immediately triggers n8n voice agent webhook
+- Sends complete patient payload:
+  - Patient name, ID
+  - Hospital details (name, address, phone)
+  - Caretaker details (name, phone)
+- Voice agent calls hospital and caretaker automatically
+- No secondary buttons needed
+
+### ✅ Backend Integration
+- `/api/trigger-n8n` endpoint in server/index.js
+- Proxies requests to n8n webhook
+- Forwards both "need" and "emergency" payloads
+- Handles errors gracefully
 
 ### ✅ UI/UX
 - Soft gradient background (indigo → blue → pink)
@@ -102,6 +124,7 @@ npm run preview
 - Accessible focus styles
 - Loading states with status indicator
 - Toast notifications for success/error
+- Smooth modal transitions for profile dialogs
 
 ### ✅ Authentication Structure
 - Sign In page (`/signin`)
@@ -162,35 +185,79 @@ useEffect(() => {
 
 ## n8n Webhook Integration
 
-### Payload Format
-
-All actions send this JSON:
+### Emergency Payload Format
 
 ```json
 {
-  "message": "🍔 Food",
-  "item": "🍔 Food",
-  "request": "🍔 Food",
-  "type": "alert" | "need",
+  "type": "emergency",
   "timestamp": "2025-10-30T12:34:56.789Z",
-  "date": "10/30/2025, 12:34:56 PM"
+  "patient": {
+    "name": "John Doe",
+    "patient_id": "PID12345",
+    "hospital_name": "CityCare Hospital",
+    "hospital_address": "123 Main St",
+    "hospital_phone": "+91XXXXXXXXXX",
+    "caretaker_name": "Jane Doe",
+    "caretaker_phone": "+91XXXXXXXXXX"
+  }
 }
 ```
 
-### Testing Without Webhook
+### Basic Need Payload Format
 
-Current implementation simulates the webhook call. To enable real calls:
+```json
+{
+  "type": "need",
+  "item": "🍔 Food",
+  "timestamp": "2025-10-30T12:34:56.789Z",
+  "caretaker_name": "Jane Doe",
+  "caretaker_phone": "+91XXXXXXXXXX"
+}
+```
 
-1. Install axios (already in dependencies)
-2. Uncomment axios code in `Dashboard.tsx`:
+### Voice Agent Workflow (n8n)
 
-```typescript
-import axios from "axios";
+When emergency is triggered, n8n should:
+1. Parse patient details from payload
+2. Call hospital phone number with voice agent
+   - Communicate emergency situation
+   - Provide patient details
+3. Book ambulance (simulated API call)
+4. Call caretaker phone number
+   - Inform about emergency
+   - Provide status update
 
-// In sendToWebhook function:
-await axios.post(webhookUrl, payload, {
-  headers: { "Content-Type": "application/json" },
-});
+### Testing Webhook
+
+Backend server proxies requests to n8n:
+
+```bash
+# Test emergency payload
+curl -X POST http://localhost:8787/api/trigger-n8n \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "emergency",
+    "timestamp": "2025-10-30T12:00:00Z",
+    "patient": {
+      "name": "Test Patient",
+      "patient_id": "TEST123",
+      "hospital_name": "Test Hospital",
+      "hospital_phone": "+911234567890",
+      "caretaker_name": "Test Caretaker",
+      "caretaker_phone": "+910987654321"
+    }
+  }'
+
+# Test need payload
+curl -X POST http://localhost:8787/api/trigger-n8n \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "need",
+    "item": "💧 Water",
+    "timestamp": "2025-10-30T12:00:00Z",
+    "caretaker_name": "Test Caretaker",
+    "caretaker_phone": "+910987654321"
+  }'
 ```
 
 ## ESP32 Integration
@@ -255,48 +322,60 @@ All colors and styles use semantic tokens from `src/index.css`:
 ## Testing Checklist
 
 - [ ] All routes navigate correctly
+- [ ] Profile dropdown opens from navbar
+- [ ] Edit Profile form saves to localStorage
+- [ ] Medical Details form saves to localStorage
 - [ ] Device status shows connected/disconnected
 - [ ] Last seen updates every second
 - [ ] Blink events appear in log
 - [ ] Test Blink button works (dev mode)
 - [ ] All action buttons disable during send
+- [ ] Sound plays when basic need button clicked
 - [ ] Status indicator shows sending/success/error
-- [ ] Emergency button reveals secondary options
+- [ ] Emergency button triggers with profile data
+- [ ] Backend /api/trigger-n8n forwards to n8n
+- [ ] n8n receives correct payload structure
 - [ ] Responsive layout on mobile (320px+)
 - [ ] No console errors
 - [ ] Accessible keyboard navigation
 
 ## Next Steps
 
-1. **Add Clerk API key** to enable real authentication
-2. **Start backend server** for real WebSocket connection
-3. **Deploy ESP32** with provided Arduino sketch
-4. **Install socket.io-client**:
+1. **Fill out profile data** via Profile dropdown
+2. **Add medical details** via Medical Details dialog
+3. **Start backend server** for real WebSocket connection:
    ```bash
-   npm install socket.io-client
+   cd server
+   npm install express socket.io cors axios
+   node index.js
    ```
-5. **Connect real WebSocket** (see WebSocket Integration above)
-6. **Enable n8n webhook** (uncomment axios code)
+4. **Configure n8n webhook** for voice agent automation
+5. **Deploy ESP32** with provided Arduino sketch (see server/README.md)
+6. **Test emergency flow** end-to-end
+7. **Verify sound alerts** work on different browsers
 
 ## Project Structure
 
 ```
 src/
 ├── components/
-│   ├── ui/              # shadcn components
-│   ├── Navbar.tsx       # Top navigation
-│   ├── DeviceStatusCard.tsx  # Connection status & log
-│   └── StatusIndicator.tsx   # Toast-like status
+│   ├── ui/                    # shadcn components
+│   ├── Navbar.tsx             # Top navigation with profile dropdown
+│   ├── ProfileDropdown.tsx    # Profile menu component
+│   ├── EditProfileDialog.tsx  # Profile editing form
+│   ├── MedicalDetailsDialog.tsx # Medical info form
+│   ├── DeviceStatusCard.tsx   # Connection status & log
+│   └── StatusIndicator.tsx    # Toast-like status
 ├── pages/
-│   ├── Dashboard.tsx    # Main app page
-│   ├── SignIn.tsx       # Auth page
-│   └── SignUp.tsx       # Auth page
-├── index.css            # Design system
-└── App.tsx              # Routes
+│   ├── Dashboard.tsx          # Main app page
+│   ├── SignIn.tsx             # Auth page
+│   └── SignUp.tsx             # Auth page
+├── index.css                  # Design system
+└── App.tsx                    # Routes
 
 server/
-├── index.js             # Socket.io server
-└── README.md            # ESP32 integration guide
+├── index.js                   # Socket.io server + n8n proxy
+└── README.md                  # ESP32 integration guide
 ```
 
 ## Support

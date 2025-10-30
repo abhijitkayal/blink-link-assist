@@ -1,79 +1,124 @@
 import { useState } from "react";
-import { Phone, Users, UtensilsCrossed, Droplet, Users as Toilet, AlertCircle } from "lucide-react";
+import { UtensilsCrossed, Droplet, Users as Toilet, AlertCircle } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import DeviceStatusCard from "@/components/DeviceStatusCard";
 import StatusIndicator from "@/components/StatusIndicator";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import axios from "axios";
 
-type ActionType = "food" | "water" | "toilet" | "help" | "hospital" | "family";
+type ActionType = "food" | "water" | "toilet" | "help" | "emergency";
 type StatusType = "idle" | "sending" | "success" | "error";
 
 const Dashboard = () => {
   const [sendingAction, setSendingAction] = useState<ActionType | null>(null);
   const [status, setStatus] = useState<StatusType>("idle");
   const [statusMessage, setStatusMessage] = useState("");
-  const [showEmergencyOptions, setShowEmergencyOptions] = useState(false);
 
-  const sendToWebhook = async (label: string, type: "alert" | "need") => {
-    const webhookUrl = import.meta.env.VITE_N8N_WEBHOOK;
-    
-    if (!webhookUrl) {
-      console.warn("VITE_N8N_WEBHOOK not configured");
-      return;
-    }
+  // Play sound for basic needs
+  const playSound = (type: string) => {
+    const frequencies: { [key: string]: number } = {
+      Food: 440, // A4
+      Water: 523, // C5
+      Toilet: 659, // E5
+      Help: 784, // G5
+    };
 
-    try {
-      const payload = {
-        message: label,
-        item: label,
-        request: label,
-        type,
-        timestamp: new Date().toISOString(),
-        date: new Date().toLocaleString(),
-      };
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
 
-      // Simulating webhook call - replace with actual axios call when webhook is configured
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Webhook payload:", payload);
-      
-      // Uncomment when ready:
-      // await axios.post(webhookUrl, payload, {
-      //   headers: { "Content-Type": "application/json" },
-      // });
-      
-      return true;
-    } catch (error) {
-      console.error("Webhook error:", error);
-      return false;
-    }
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = frequencies[type] || 440;
+    oscillator.type = "sine";
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(
+      0.01,
+      audioContext.currentTime + 0.5
+    );
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
   };
 
-  const handleAction = async (action: ActionType, label: string, type: "alert" | "need") => {
+  // Send to backend n8n proxy
+  const sendToWebhook = async (payload: any) => {
+    const backendUrl = import.meta.env.VITE_WS_URL || "http://localhost:8787";
+    await axios.post(`${backendUrl}/api/trigger-n8n`, payload);
+  };
+
+  const handleBasicNeed = async (action: ActionType, item: string, emoji: string) => {
     setSendingAction(action);
     setStatus("sending");
 
-    const success = await sendToWebhook(label, type);
+    // Play sound
+    playSound(item);
 
-    if (success) {
+    // Get profile data
+    const profileData = JSON.parse(localStorage.getItem("profileData") || "{}");
+
+    try {
+      await sendToWebhook({
+        type: "need",
+        item: `${emoji} ${item}`,
+        timestamp: new Date().toISOString(),
+        caretaker_name: profileData.caretakerName || "Unknown",
+        caretaker_phone: profileData.caretakerPhone || "N/A",
+      });
       setStatus("success");
-      setStatusMessage(label);
-    } else {
+      setStatusMessage(item);
+    } catch (error) {
+      console.error("Failed to send:", error);
       setStatus("error");
     }
 
     setSendingAction(null);
 
-    // Reset status after 3 seconds
+    // Reset status after 2 seconds
     setTimeout(() => {
       setStatus("idle");
       setStatusMessage("");
-    }, 3000);
+    }, 2000);
   };
 
-  const handleEmergency = () => {
-    setShowEmergencyOptions(true);
-    handleAction("help", "🚨 EMERGENCY 🚨", "alert");
+  const handleEmergency = async () => {
+    setSendingAction("emergency");
+    setStatus("sending");
+
+    // Get profile and medical data
+    const profileData = JSON.parse(localStorage.getItem("profileData") || "{}");
+    const medicalData = JSON.parse(localStorage.getItem("medicalData") || "{}");
+
+    try {
+      await sendToWebhook({
+        type: "emergency",
+        timestamp: new Date().toISOString(),
+        patient: {
+          name: profileData.name || "Unknown Patient",
+          patient_id: medicalData.patientId || "N/A",
+          hospital_name: medicalData.hospitalName || "Unknown Hospital",
+          hospital_address: medicalData.hospitalAddress || "N/A",
+          hospital_phone: medicalData.hospitalPhone || "N/A",
+          caretaker_name: profileData.caretakerName || "Unknown",
+          caretaker_phone: profileData.caretakerPhone || "N/A",
+        },
+      });
+      setStatus("success");
+      setStatusMessage("Emergency");
+    } catch (error) {
+      console.error("Failed to send emergency:", error);
+      setStatus("error");
+    }
+
+    setSendingAction(null);
+
+    setTimeout(() => {
+      setStatus("idle");
+      setStatusMessage("");
+    }, 2000);
   };
 
   return (
@@ -100,7 +145,7 @@ const Dashboard = () => {
             <h2 className="mb-6 text-2xl font-semibold text-foreground">Basic Needs</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Button
-                onClick={() => handleAction("food", "🍔 Food", "need")}
+                onClick={() => handleBasicNeed("food", "Food", "🍔")}
                 disabled={sendingAction === "food"}
                 className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-food))] text-[hsl(var(--action-food-fg))] border-[hsl(var(--action-food-border))] hover:bg-[hsl(var(--action-food))]/80"
               >
@@ -109,7 +154,7 @@ const Dashboard = () => {
               </Button>
 
               <Button
-                onClick={() => handleAction("water", "💧 Water", "need")}
+                onClick={() => handleBasicNeed("water", "Water", "💧")}
                 disabled={sendingAction === "water"}
                 className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-water))] text-[hsl(var(--action-water-fg))] border-[hsl(var(--action-water-border))] hover:bg-[hsl(var(--action-water))]/80"
               >
@@ -118,7 +163,7 @@ const Dashboard = () => {
               </Button>
 
               <Button
-                onClick={() => handleAction("toilet", "🚻 Toilet", "need")}
+                onClick={() => handleBasicNeed("toilet", "Toilet", "🚽")}
                 disabled={sendingAction === "toilet"}
                 className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-toilet))] text-[hsl(var(--action-toilet-fg))] border-[hsl(var(--action-toilet-border))] hover:bg-[hsl(var(--action-toilet))]/80"
               >
@@ -127,7 +172,7 @@ const Dashboard = () => {
               </Button>
 
               <Button
-                onClick={() => handleAction("help", "🆘 Help", "alert")}
+                onClick={() => handleBasicNeed("help", "Help", "🆘")}
                 disabled={sendingAction === "help"}
                 className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-help))] text-[hsl(var(--action-help-fg))] border-[hsl(var(--action-help-border))] hover:bg-[hsl(var(--action-help))]/80"
               >
@@ -141,48 +186,16 @@ const Dashboard = () => {
           <Card className="border-2 border-red-200 p-6 shadow-lg">
             <h2 className="mb-6 text-2xl font-semibold text-foreground">Emergency</h2>
             
-            {!showEmergencyOptions ? (
-              <Button
-                onClick={handleEmergency}
-                disabled={sendingAction !== null}
-                className="w-full h-auto py-8 text-xl font-bold bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl shadow-lg animate-pulse-glow hover:animate-none transition-all"
-              >
-                🚨 EMERGENCY 🚨
-              </Button>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-center text-sm font-medium text-muted-foreground mb-4">
-                  Emergency alert sent! Choose additional action:
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Button
-                    onClick={() => handleAction("hospital", "🏥 Call Hospital", "alert")}
-                    disabled={sendingAction === "hospital"}
-                    className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-hospital))] text-[hsl(var(--action-hospital-fg))] border-[hsl(var(--action-hospital-border))] hover:bg-[hsl(var(--action-hospital))]/80"
-                  >
-                    <Phone className="h-8 w-8" />
-                    <span className="text-lg font-semibold">Call Hospital</span>
-                  </Button>
-
-                  <Button
-                    onClick={() => handleAction("family", "📞 Call Family", "alert")}
-                    disabled={sendingAction === "family"}
-                    className="action-btn h-auto flex-col gap-3 bg-[hsl(var(--action-family))] text-[hsl(var(--action-family-fg))] border-[hsl(var(--action-family-border))] hover:bg-[hsl(var(--action-family))]/80"
-                  >
-                    <Users className="h-8 w-8" />
-                    <span className="text-lg font-semibold">Call Family</span>
-                  </Button>
-                </div>
-                
-                <Button
-                  variant="outline"
-                  onClick={() => setShowEmergencyOptions(false)}
-                  className="w-full mt-4"
-                >
-                  Close
-                </Button>
-              </div>
-            )}
+            <Button
+              onClick={handleEmergency}
+              disabled={sendingAction !== null}
+              className="w-full h-auto py-8 text-xl font-bold bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl shadow-lg animate-pulse-glow hover:animate-none transition-all"
+            >
+              🚨 EMERGENCY 🚨
+            </Button>
+            <p className="text-xs text-center text-muted-foreground mt-3">
+              Triggers voice agent to call hospital & caretaker
+            </p>
           </Card>
         </div>
       </main>

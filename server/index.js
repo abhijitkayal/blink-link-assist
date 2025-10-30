@@ -18,6 +18,7 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 const server = http.createServer(app);
@@ -106,6 +107,26 @@ app.post('/api/blink', (req, res) => {
   console.log(`[BLINK] Device ${deviceId} blinked`);
 
   res.json({ success: true, event: blinkEvent });
+});
+
+// n8n webhook proxy endpoint
+app.post('/api/trigger-n8n', async (req, res) => {
+  try {
+    const payload = req.body;
+    const n8nWebhook = process.env.VITE_N8N_WEBHOOK || "https://n8n.easykat.info/webhook/netravaani-emergency";
+    
+    console.log("[n8n] Forwarding payload:", payload);
+    
+    const response = await axios.post(n8nWebhook, payload, {
+      headers: { "Content-Type": "application/json" },
+    });
+
+    console.log("[n8n] Response:", response.data);
+    res.json({ success: true, message: "n8n webhook triggered", data: response.data });
+  } catch (error) {
+    console.error("[n8n] Error:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // SSE endpoint for fallback
