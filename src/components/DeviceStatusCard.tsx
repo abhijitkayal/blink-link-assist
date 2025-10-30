@@ -3,6 +3,7 @@ import { Wifi, WifiOff, Activity, Zap } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { io, Socket } from "socket.io-client";
 
 interface DeviceEvent {
   type: "blink" | "status" | "telemetry";
@@ -20,21 +21,89 @@ const DeviceStatusCard = ({
   deviceId = "esp32-01",
   onTestBlink,
 }: DeviceStatusCardProps) => {
-  const [isConnected, setIsConnected] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
   const [lastSeen, setLastSeen] = useState<Date>(new Date());
-  const [events, setEvents] = useState<DeviceEvent[]>([
-    {
-      type: "status",
-      timestamp: new Date().toISOString(),
-      message: "Device connected",
-    },
-  ]);
+  const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [transport] = useState<"ws" | "mqtt" | "sse">("ws");
+  const [socket, setSocket] = useState<Socket | null>(null);
 
-  // Simulate connection status changes
+  // Connect to WebSocket server
+  useEffect(() => {
+    const wsUrl = import.meta.env.VITE_WS_URL || "http://localhost:8787";
+    const newSocket = io(wsUrl, {
+      query: { deviceId },
+    });
+
+    newSocket.on("connect", () => {
+      setIsConnected(true);
+      const newEvent: DeviceEvent = {
+        type: "status",
+        timestamp: new Date().toISOString(),
+        message: "Connected to server",
+      };
+      setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+      newSocket.emit("hello", { app: "blink-comm", version: "1.0.0", deviceId });
+    });
+
+    newSocket.on("disconnect", () => {
+      setIsConnected(false);
+      const newEvent: DeviceEvent = {
+        type: "status",
+        timestamp: new Date().toISOString(),
+        message: "Disconnected from server",
+      };
+      setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+    });
+
+    newSocket.on("status", (data: { deviceId: string; status: string; lastSeen: number | string }) => {
+      if (data.deviceId === deviceId) {
+        setLastSeen(new Date(data.lastSeen));
+        const newEvent: DeviceEvent = {
+          type: "status",
+          timestamp: new Date().toISOString(),
+          message: `Device ${data.status}`,
+          deviceId: data.deviceId,
+        };
+        setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+      }
+    });
+
+    newSocket.on("blink", (data: { deviceId: string; timestamp: string }) => {
+      if (data.deviceId === deviceId) {
+        setLastSeen(new Date());
+        const newEvent: DeviceEvent = {
+          type: "blink",
+          timestamp: data.timestamp,
+          message: "Blink event received from ESP32",
+          deviceId: data.deviceId,
+        };
+        setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+      }
+    });
+
+    newSocket.on("telemetry", (data: { deviceId: string; rssi?: number; battery?: number; timestamp: string }) => {
+      if (data.deviceId === deviceId) {
+        const newEvent: DeviceEvent = {
+          type: "telemetry",
+          timestamp: data.timestamp,
+          message: `Telemetry: ${data.rssi ? `RSSI ${data.rssi}dBm` : ""} ${data.battery ? `Battery ${data.battery}%` : ""}`,
+          deviceId: data.deviceId,
+        };
+        setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+      }
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, [deviceId]);
+
+  // Update last seen timer
   useEffect(() => {
     const interval = setInterval(() => {
-      setLastSeen(new Date());
+      setLastSeen((prev) => new Date(prev));
     }, 1000);
 
     return () => clearInterval(interval);
@@ -49,24 +118,6 @@ const DeviceStatusCard = ({
     if (minutes < 60) return `${minutes}m ago`;
     return `${Math.floor(minutes / 60)}h ago`;
   };
-
-  // Simulate incoming blinks every 10-30 seconds
-  useEffect(() => {
-    const interval = setInterval(
-      () => {
-        const newEvent: DeviceEvent = {
-          type: "blink",
-          timestamp: new Date().toISOString(),
-          message: "Blink event received from ESP32",
-          deviceId,
-        };
-        setEvents((prev) => [newEvent, ...prev].slice(0, 50));
-      },
-      Math.random() * 20000 + 10000
-    );
-
-    return () => clearInterval(interval);
-  }, [deviceId]);
 
   const handleTestBlink = () => {
     const newEvent: DeviceEvent = {
