@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { UserCircle, Edit, Hospital, LogOut } from "lucide-react";
 import {
   DropdownMenu,
@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import EditProfileDialog from "./EditProfileDialog";
 import MedicalDetailsDialog from "./MedicalDetailsDialog";
@@ -13,6 +14,14 @@ import MedicalDetailsDialog from "./MedicalDetailsDialog";
 const ProfileDropdown = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [medicalDetailsOpen, setMedicalDetailsOpen] = useState(false);
+  const [profileData, setProfileData] = useState<{ name?: string; avatar?: string }>({});
+
+  useEffect(() => {
+    const stored = localStorage.getItem("profileData");
+    if (stored) {
+      setProfileData(JSON.parse(stored));
+    }
+  }, [editProfileOpen]);
 
   const handleLogout = () => {
     // Future: Clerk logout
@@ -24,8 +33,13 @@ const ProfileDropdown = () => {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-10 w-10">
-            <UserCircle className="h-6 w-6" />
+          <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full p-0">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={profileData.avatar} alt="Profile" />
+              <AvatarFallback>
+                {profileData.name?.charAt(0)?.toUpperCase() || <UserCircle className="h-6 w-6" />}
+              </AvatarFallback>
+            </Avatar>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48 bg-card border-border">
